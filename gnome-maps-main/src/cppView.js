@@ -237,7 +237,7 @@ export class CPPView extends Gtk.Box {
 
     _onRouteReset() {
         this._clearResults();
-        this._mapView._clearCPPRouteLayers();
+        this._mapView.clearCPPRoute();
     }
 
     /* ================================================================== */

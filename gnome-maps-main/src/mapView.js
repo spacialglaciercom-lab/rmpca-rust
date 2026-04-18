@@ -1411,7 +1411,7 @@ export class MapView extends Gtk.Overlay {
      * @param {CPPRoute} cppRoute - Route object with path, bbox, etc.
      */
     showCPPRoute(cppRoute) {
-        this._clearCPPRouteLayers();
+        this.clearCPPRoute();
 
         let routeLayer = this._createRouteLayer(CPP_ROUTE_COLOR,
                                                 CPP_ROUTE_OUTLINE_COLOR,
@@ -1436,7 +1436,7 @@ export class MapView extends Gtk.Overlay {
     /**
      * Clear all CPP route layers from the map.
      */
-    _clearCPPRouteLayers() {
+    clearCPPRoute() {
         this._cppRouteLayers.forEach((layer) => {
             layer.remove_all();
             layer.visible = false;

@@ -36,6 +36,8 @@ const _ = gettext.gettext;
 /* Default path to the rmpca binary */
 const RMPCA_DEFAULT_PATH = 'rmpca';
 
+const SIGTERM = 15;
+
 /**
  * CPPOptimizer — subprocess wrapper around `rmpca serve`
  *
@@ -61,7 +63,7 @@ export class CPPOptimizer {
      */
     cancelCurrentRequest() {
         if (this._subprocess) {
-            this._subprocess.send_signal(15); // SIGTERM
+            this._subprocess.send_signal(SIGTERM);
             this._subprocess = null;
         }
     }
@@ -73,7 +75,7 @@ export class CPPOptimizer {
      * @param {Object} options
      * @param {string} options.offlineMapFile - Path to .osm.pbf file
      * @param {string} [options.profile='truck'] - Vehicle profile
-     * @param {[number,number]} [options.depot] - Optional [lon, lat] depot
+     * @param {[number,number]} [options.depot] - Optional [lat, lon] depot
      * @param {function} onProgress - Called with {message, percent}
      */
     optimize(polygon, options, onProgress) {
@@ -235,8 +237,12 @@ export class CPPOptimizer {
             let stdinStream = proc.get_stdin_pipe();
             let stdinBytes = new GLib.Bytes(requestJSON + '\n');
             stdinStream.write_bytes_async(stdinBytes, GLib.PRIORITY_DEFAULT, null, (s, r) => {
-                s.write_bytes_finish(r);
-                s.close(null);
+                try {
+                    s.write_bytes_finish(r);
+                    s.close(null);
+                } catch (e) {
+                    Utils.debug('CPP: GPX stdin write error: ' + e.message);
+                }
             });
 
             // Read GPX from stdout
@@ -247,7 +253,12 @@ export class CPPOptimizer {
                 gpxBuf += chunk;
             }, () => {
                 proc.wait_async(null, (p, r) => {
-                    p.wait_finish(r);
+                    try {
+                        p.wait_finish(r);
+                    } catch (e) {
+                        onComplete(null, e.message);
+                        return;
+                    }
                     if (p.get_exit_status() === 0)
                         onComplete(gpxBuf, null);
                     else
