@@ -100,10 +100,4 @@ export class CPPRoute extends Route {
     }
 }
 
-GObject.registerClass({
-    Signals: {
-        'update': {},
-        'reset': {},
-        'error': { param_types: [GObject.TYPE_STRING] }
-    }
-}, CPPRoute);
+GObject.registerClass({}, CPPRoute);

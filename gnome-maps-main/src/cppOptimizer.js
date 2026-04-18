@@ -63,18 +63,18 @@ export class CPPOptimizer {
     }
 
     /**
-     * Run CPP optimization for the given bounding box and options.
+     * Run CPP optimization for the given polygon and options.
      *
-     * @param {BoundingBox} bbox - The area to optimize
+     * @param {Array} polygon - Array of [lon, lat] coordinates forming the polygon
      * @param {Object} options
      * @param {string} options.offlineMapFile - Path to .osm.pbf file
      * @param {string} [options.profile='truck'] - Vehicle profile
-     * @param {[number,number]} [options.depot] - Optional [lat, lon] depot
+     * @param {[number,number]} [options.depot] - Optional [lon, lat] depot
      * @param {function} onProgress - Called with {message, percent}
      */
-    optimize(bbox, options, onProgress) {
+    optimize(polygon, options, onProgress) {
         let request = {
-            bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
+            polygon: { coordinates: polygon },
             offline_map_file: options.offlineMapFile,
             profile: options.profile || 'truck',
         };
@@ -198,15 +198,15 @@ export class CPPOptimizer {
     /**
      * Export a CPP route as GPX.
      *
-     * @param {BoundingBox} bbox
+     * @param {Array} polygon - Array of [lon, lat] coordinates forming the polygon
      * @param {Object} options
      * @param {string} options.offlineMapFile
      * @param {string} [options.profile='truck']
      * @param {function} onComplete - Called with (gpxString, error)
      */
-    exportGPX(bbox, options, onComplete) {
+    exportGPX(polygon, options, onComplete) {
         let request = {
-            bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
+            polygon: { coordinates: polygon },
             offline_map_file: options.offlineMapFile,
             profile: options.profile || 'truck',
         };

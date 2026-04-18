@@ -33,6 +33,7 @@
     <file>boundingBox.js</file>
     <file>bboxSelector.js</file>
     <file>circleIconMarker.js</file>
+    <file>polygonSelector.js</file>
     <file>color.js</file>
     <file>constants.js</file>
     <file>cppOptimizer.js</file>

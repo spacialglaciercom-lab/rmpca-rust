@@ -5,4 +5,4 @@
 
 pub mod serve_parser;
 
-pub use serve_parser::{parse_pbf_in_bbox, parse_pbf_ways};
+pub use serve_parser::{parse_pbf_in_bbox, parse_pbf_in_polygon, parse_pbf_ways};

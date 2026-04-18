@@ -32,7 +32,12 @@ pub struct ServeArgs {
 #[derive(Debug, Deserialize)]
 struct ServeRequest {
     /// Bounding box: [west, south, east, north] in decimal degrees
-    bbox: (f64, f64, f64, f64),
+    #[serde(default)]
+    bbox: Option<(f64, f64, f64, f64)>,
+
+    /// Polygon as GeoJSON: { coordinates: [[lon, lat], ...] }
+    #[serde(default)]
+    polygon: Option<GeoPolygon>,
 
     /// Path to local .osm.pbf file
     offline_map_file: String,
@@ -44,6 +49,13 @@ struct ServeRequest {
     /// Optional depot location as [lat, lon]
     #[serde(default)]
     depot: Option<(f64, f64)>,
+}
+
+/// GeoJSON polygon representation
+#[derive(Debug, Deserialize)]
+struct GeoPolygon {
+    /// Array of [longitude, latitude] coordinate pairs
+    coordinates: Vec<(f64, f64)>,
 }
 
 fn default_profile() -> String {
@@ -143,17 +155,42 @@ pub fn run(args: ServeArgs, _config: &Config) -> Result<()> {
 
     progress(&format!("Parsing OSM PBF: {}", request.offline_map_file), Some(10))?;
 
-    let ways = match crate::osm::parse_pbf_in_bbox(&pbf_path, request.bbox) {
-        Ok(w) => w,
-        Err(e) => {
-            let err = ServeError {
-                success: false,
-                error: format!("Failed to parse PBF: {}", e),
-            };
-            let out = serde_json::to_string(&err).unwrap();
-            println!("{}", out);
-            std::process::exit(1);
+    let ways = if let Some(ref polygon) = request.polygon {
+        // Use polygon-based filtering
+        match crate::osm::parse_pbf_in_polygon(&pbf_path, &polygon.coordinates) {
+            Ok(w) => w,
+            Err(e) => {
+                let err = ServeError {
+                    success: false,
+                    error: format!("Failed to parse PBF with polygon: {}", e),
+                };
+                let out = serde_json::to_string(&err).unwrap();
+                println!("{}", out);
+                std::process::exit(1);
+            }
         }
+    } else if let Some(bbox) = request.bbox {
+        // Fall back to bbox-based filtering for backward compatibility
+        match crate::osm::parse_pbf_in_bbox(&pbf_path, bbox) {
+            Ok(w) => w,
+            Err(e) => {
+                let err = ServeError {
+                    success: false,
+                    error: format!("Failed to parse PBF: {}", e),
+                };
+                let out = serde_json::to_string(&err).unwrap();
+                println!("{}", out);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let err = ServeError {
+            success: false,
+            error: "Either bbox or polygon must be provided".to_string(),
+        };
+        let out = serde_json::to_string(&err).unwrap();
+        println!("{}", out);
+        std::process::exit(1);
     };
 
     progress(&format!("Extracted {} ways", ways.len()), Some(30))?;

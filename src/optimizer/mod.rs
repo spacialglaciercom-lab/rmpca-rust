@@ -10,6 +10,7 @@ use crate::optimizer::abstractions::SpatialProvider;
 use crate::optimizer::types::{Node, OptimizationResult, RoutePoint, Way};
 use anyhow::Result;
 use petgraph::graph::{DiGraph, NodeIndex, EdgeIndex};
+use petgraph::visit::EdgeRef;
 use std::collections::HashMap;
 
 /// Route optimizer using directed Chinese Postman approach.
@@ -112,51 +113,88 @@ impl RouteOptimizer {
     /// Find imbalanced vertices, compute shortest paths between them,
     /// then add minimum-cost augmenting edges.
     pub fn make_eulerian(&mut self) -> Result<()> {
-        let mut supply: Vec<(NodeIndex, i64)> = Vec::new();
-        let mut demand: Vec<(NodeIndex, i64)> = Vec::new();
+        // Expand supply/demand into individual node entries for matching
+        let mut supply_nodes: Vec<NodeIndex> = Vec::new();
+        let mut demand_nodes: Vec<NodeIndex> = Vec::new();
 
         for idx in self.graph.node_indices() {
             let in_deg = self.graph.edges_directed(idx, petgraph::Direction::Incoming).count();
             let out_deg = self.graph.edges_directed(idx, petgraph::Direction::Outgoing).count();
             let diff = out_deg as i64 - in_deg as i64;
             if diff > 0 {
-                supply.push((idx, diff));
+                for _ in 0..diff {
+                    supply_nodes.push(idx);
+                }
             } else if diff < 0 {
-                demand.push((idx, -diff));
+                for _ in 0..(-diff) {
+                    demand_nodes.push(idx);
+                }
             }
         }
 
-        // Greedy matching: pair supply with demand nodes and add shortest paths
-        // TODO: Replace with proper minimum-weight matching algorithm
-        while let Some((supply_idx, supply_count)) = supply.first_mut() {
-            if *supply_count == 0 {
-                supply.remove(0);
-                continue;
+        if supply_nodes.len() != demand_nodes.len() {
+            anyhow::bail!(
+                "Graph cannot be balanced: supply ({}) != demand ({})",
+                supply_nodes.len(), demand_nodes.len()
+            );
+        }
+
+        if supply_nodes.is_empty() {
+            return Ok(());
+        }
+
+        // Compute cost matrix: shortest path from each unique supply to each unique demand
+        let unique_supply: Vec<NodeIndex> = {
+            let mut s: Vec<NodeIndex> = supply_nodes.clone();
+            s.sort();
+            s.dedup();
+            s
+        };
+        let unique_demand: Vec<NodeIndex> = {
+            let mut d: Vec<NodeIndex> = demand_nodes.clone();
+            d.sort();
+            d.dedup();
+            d
+        };
+
+        // Dijkstra from each unique supply node, cache distances to all unique demand nodes
+        let mut cost: HashMap<NodeIndex, HashMap<NodeIndex, f64>> = HashMap::new();
+        for &s_node in &unique_supply {
+            let distances = petgraph::algo::dijkstra(
+                &self.graph, s_node, None, |e| *e.weight(),
+            );
+            let mut row: HashMap<NodeIndex, f64> = HashMap::new();
+            for &d_node in &unique_demand {
+                if let Some(&d) = distances.get(&d_node) {
+                    row.insert(d_node, d);
+                }
             }
+            cost.insert(s_node, row);
+        }
 
-            if let Some((demand_idx, demand_count)) = demand.first_mut() {
-                if *demand_count == 0 {
-                    demand.remove(0);
-                    continue;
+        // Greedy matching using the cost matrix
+        let mut demand_remaining: HashMap<NodeIndex, i64> = HashMap::new();
+        for &d in &demand_nodes {
+            *demand_remaining.entry(d).or_insert(0) += 1;
+        }
+
+        for &s_node in &supply_nodes {
+            if let Some(row) = cost.get(&s_node) {
+                // Find cheapest remaining demand
+                let mut best_demand = None;
+                let mut best_cost = f64::INFINITY;
+                for (&d_node, &c) in row.iter() {
+                    if let Some(&remaining) = demand_remaining.get(&d_node) {
+                        if remaining > 0 && c < best_cost {
+                            best_cost = c;
+                            best_demand = Some(d_node);
+                        }
+                    }
                 }
-
-                // Find shortest path and add as augmented edge
-                let result = petgraph::algo::dijkstra(
-                    &self.graph,
-                    *supply_idx,
-                    Some(*demand_idx),
-                    |e| *e.weight(),
-                );
-
-                if let Some(dist) = result.get(demand_idx) {
-                    // Add the shortest path as an augmented edge
-                    self.add_edge(*supply_idx, *demand_idx, *dist, true);
+                if let Some(d_node) = best_demand {
+                    *demand_remaining.get_mut(&d_node).unwrap() -= 1;
+                    self.add_edge(s_node, d_node, best_cost, true);
                 }
-
-                *supply_count -= 1;
-                *demand_count -= 1;
-            } else {
-                break;
             }
         }
 
@@ -215,6 +253,116 @@ impl RouteOptimizer {
         self.spatial_registry = registry;
     }
 
+    /// Retain only the largest strongly connected component in the graph.
+    ///
+    /// Road networks from bounding box extracts are typically disconnected
+    /// (roads entering/exiting the bbox create dead-ends). The Eulerian
+    /// circuit algorithm requires a strongly connected graph.
+    fn retain_largest_scc(&mut self) -> Result<()> {
+        if self.graph.node_count() == 0 {
+            return Ok(());
+        }
+
+        // Build reverse adjacency
+        let mut reverse_adj: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
+        for node in self.graph.node_indices() {
+            for neighbor in self.graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
+                reverse_adj.entry(neighbor).or_default().push(node);
+            }
+        }
+
+        // Find all SCCs using forward+reverse BFS
+        let mut visited: std::collections::HashSet<NodeIndex> = std::collections::HashSet::new();
+        let mut best_scc: std::collections::HashSet<NodeIndex> = std::collections::HashSet::new();
+
+        for start in self.graph.node_indices() {
+            if visited.contains(&start) {
+                continue;
+            }
+
+            // Forward BFS
+            let mut forward = std::collections::HashSet::new();
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(start);
+            forward.insert(start);
+            while let Some(n) = queue.pop_front() {
+                for neighbor in self.graph.neighbors_directed(n, petgraph::Direction::Outgoing) {
+                    if forward.insert(neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+
+            // Reverse BFS
+            let mut backward = std::collections::HashSet::new();
+            queue.push_back(start);
+            backward.insert(start);
+            while let Some(n) = queue.pop_front() {
+                if let Some(preds) = reverse_adj.get(&n) {
+                    for &pred in preds {
+                        if backward.insert(pred) {
+                            queue.push_back(pred);
+                        }
+                    }
+                }
+            }
+
+            // SCC = intersection
+            let scc: std::collections::HashSet<NodeIndex> = forward
+                .intersection(&backward)
+                .copied()
+                .collect();
+
+            for &node in &scc {
+                visited.insert(node);
+            }
+
+            if scc.len() > best_scc.len() {
+                best_scc = scc;
+            }
+        }
+
+        if best_scc.is_empty() {
+            anyhow::bail!("Graph has no strongly connected components");
+        }
+
+        eprintln!("DEBUG: Largest SCC has {} nodes out of {}", best_scc.len(), self.graph.node_count());
+
+        // Rebuild graph with only SCC nodes
+        let mut new_graph = DiGraph::new();
+        let mut old_to_new: HashMap<NodeIndex, NodeIndex> = HashMap::with_capacity(best_scc.len());
+
+        for old_idx in self.graph.node_indices() {
+            if best_scc.contains(&old_idx) {
+                let node = self.graph[old_idx].clone();
+                let new_idx = new_graph.add_node(node);
+                old_to_new.insert(old_idx, new_idx);
+            }
+        }
+
+        for old_idx in self.graph.node_indices() {
+            if let Some(&new_from) = old_to_new.get(&old_idx) {
+                for edge in self.graph.edges(old_idx) {
+                    if let Some(&new_to) = old_to_new.get(&edge.target()) {
+                        new_graph.add_edge(new_from, new_to, *edge.weight());
+                    }
+                }
+            }
+        }
+
+        self.graph = new_graph;
+
+        // Rebuild node_index
+        self.node_index.clear();
+        for idx in self.graph.node_indices() {
+            self.node_index.insert(self.graph[idx].id.clone(), idx);
+        }
+
+        self.augmented_edges.clear();
+
+        Ok(())
+    }
+
     /// Populate spatial registry from geo::types::Way (which has geometry).
     pub fn populate_spatial_registry_from_geo_ways(&mut self, ways: &[GeoWay]) {
         for way in ways {
@@ -233,17 +381,43 @@ impl RouteOptimizer {
         // 2. Build directed graph (uses spatial_registry for edge weights)
         self.build_graph_from_geo_ways(ways)?;
 
-        // Track original graph size for stats BEFORE balancing
+        // Track original graph size for stats BEFORE any modification
         let original_edge_count = self.graph.edge_count();
         let original_node_count = self.graph.node_count();
 
-        // 3. Make Eulerian (adds augmented edges)
+        // 3. Reduce to largest strongly connected component
+        self.retain_largest_scc()?;
+
+        eprintln!("DEBUG: After SCC: {} nodes, {} edges",
+            self.graph.node_count(), self.graph.edge_count());
+
+        // Verify strong connectivity
+        if let Some(start_check) = self.graph.node_indices().next() {
+            let forward = petgraph::algo::dijkstra(&self.graph, start_check, None, |e| *e.weight());
+            let reachable = forward.len();
+            eprintln!("DEBUG: Reachable from start: {}/{}", reachable, self.graph.node_count());
+        }
+
+        // 4. Make Eulerian (adds augmented edges)
         self.make_eulerian()?;
 
-        // 4. Find circuit (start from first node)
-        let start = ways.first()
-            .and_then(|w| w.node_ids.first())
-            .ok_or_else(|| anyhow::anyhow!("No nodes in input"))?;
+        // Verify balance
+        let mut max_imbalance: i64 = 0;
+        for idx in self.graph.node_indices() {
+            let in_deg = self.graph.edges_directed(idx, petgraph::Direction::Incoming).count();
+            let out_deg = self.graph.edges_directed(idx, petgraph::Direction::Outgoing).count();
+            let diff = (out_deg as i64 - in_deg as i64).abs();
+            if diff > max_imbalance {
+                max_imbalance = diff;
+            }
+        }
+        eprintln!("DEBUG: After balancing: {} edges, max imbalance: {}",
+            self.graph.edge_count(), max_imbalance);
+
+        // 5. Find circuit (start from first remaining node)
+        let start_idx = self.graph.node_indices().next()
+            .ok_or_else(|| anyhow::anyhow!("No nodes in graph after filtering"))?;
+        let start = &self.graph[start_idx].id;
         let circuit = self.find_circuit(start)?;
 
         // 5. Convert circuit to route points using spatial registry

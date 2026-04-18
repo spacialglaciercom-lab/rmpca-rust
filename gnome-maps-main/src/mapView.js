@@ -60,6 +60,7 @@ import {UserLocationMarker} from './userLocationMarker.js';
 import * as Utils from './utils.js';
 import * as URIS from './uris.js';
 import {BBoxSelector} from './bboxSelector.js';
+import {PolygonSelector} from './polygonSelector.js';
 
 const _LOCATION_STORE_TIMEOUT = 500;
 const MapMinZoom = 2;
@@ -310,7 +311,10 @@ export class MapView extends Gtk.Overlay {
         map.viewport.max_zoom_level = MapMaxZoom;
         map.viewport.min_zoom_level = MapMinZoom;
 
-        map.viewport.connect('changed', this._onViewportChanged.bind(this));
+        // Shumate 1.4 has no 'changed' signal; connect to individual property notifications
+        map.viewport.connect('notify::zoom-level', this._onViewportChanged.bind(this));
+        map.viewport.connect('notify::longitude', this._onViewportChanged.bind(this));
+        map.viewport.connect('notify::latitude', this._onViewportChanged.bind(this));
         // switching map type will set view min-zoom-level from map source
         map.viewport.connect('notify::min-zoom-level', () => {
             if (map.viewport.min_zoom_level < MapMinZoom) {
@@ -380,6 +384,7 @@ export class MapView extends Gtk.Overlay {
         this._routeLayers = [];
         this._cppRouteLayers = [];
         this._bboxSelector = new BBoxSelector(this);
+        this._polygonSelector = new PolygonSelector(this);
     }
 
     _connectRouteSignals() {
@@ -1381,6 +1386,22 @@ export class MapView extends Gtk.Overlay {
      */
     disableBBoxSelection() {
         this._bboxSelector.disable();
+    }
+
+    /**
+     * Enable polygon selection mode on the map.
+     * The user can click to place vertices. When they close the polygon,
+     * @callback is called with the resulting polygon coordinates [[lon, lat], ...].
+     */
+    enablePolygonSelection(callback) {
+        this._polygonSelector.enable(callback);
+    }
+
+    /**
+     * Disable polygon selection mode and remove the overlay.
+     */
+    disablePolygonSelection() {
+        this._polygonSelector.disable();
     }
 
     /**

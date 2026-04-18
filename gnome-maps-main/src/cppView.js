@@ -32,8 +32,12 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
+import gettext from 'gettext';
 import {CPPOptimizer} from './cppOptimizer.js';
+import {Application} from './application.js';
 import * as Utils from './utils.js';
+
+const _ = gettext.gettext;
 
 const PROFILE_NAMES = ['truck', 'car', 'delivery'];
 
@@ -49,7 +53,7 @@ export class CPPView extends Gtk.Box {
         this._optimizer = new CPPOptimizer({ rmpcaPath: rmpcaPath });
         
         this._offlineMapFile = this._settings.get('cpp-offline-map-file');
-        this._bbox = null;
+        this._polygon = null;
         this._drawingArea = false;
         this._running = false;
 
@@ -118,19 +122,16 @@ export class CPPView extends Gtk.Box {
         this._drawingArea = true;
         this._drawAreaButton.label = _('Cancel Drawing');
 
-        this._mapView.enableBBoxSelection((bbox) => {
-            this._bbox = bbox;
+        this._mapView.enablePolygonSelection((polygon) => {
+            this._polygon = polygon;
             this._drawingArea = false;
             this._drawAreaButton.label = _('Area Selected');
-
-            if (bbox.isValid())
-                this._mapView.gotoBBox(bbox);
         });
     }
 
     _cancelDrawing() {
         this._drawingArea = false;
-        this._mapView.disableBBoxSelection();
+        this._mapView.disablePolygonSelection();
         this._drawAreaButton.label = _('Draw Area on Map');
     }
 
@@ -156,8 +157,8 @@ export class CPPView extends Gtk.Box {
             return;
         }
 
-        if (!this._bbox || !this._bbox.isValid()) {
-            this._showInlineError(_('Draw an area on the map first'));
+        if (!this._polygon || this._polygon.length < 3) {
+            this._showInlineError(_('Draw an area with at least 3 points on the map first'));
             return;
         }
 
@@ -184,7 +185,7 @@ export class CPPView extends Gtk.Box {
         this._clearResults();
 
         /* Run */
-        this._optimizer.optimize(this._bbox, {
+        this._optimizer.optimize(this._polygon, {
             offlineMapFile: this._offlineMapFile,
             profile: PROFILE_NAMES[this._profileDropDown.selected] || 'truck',
             depot: depot,
@@ -280,7 +281,7 @@ export class CPPView extends Gtk.Box {
             try {
                 let file = dlg.save_finish(result);
                 
-                this._optimizer.exportGPX(this._bbox, {
+                this._optimizer.exportGPX(this._polygon, {
                     offlineMapFile: this._offlineMapFile,
                     profile: PROFILE_NAMES[this._profileDropDown.selected] || 'truck',
                 }, (gpxString, error) => {

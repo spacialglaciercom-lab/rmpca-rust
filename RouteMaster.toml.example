@@ -1,0 +1,40 @@
+# RouteMaster User Configuration Example
+# Copy to ~/.config/RouteMaster.toml and customize
+
+[network]
+# Default jail addresses (can be overridden with RMPCA_* env vars or CLI flags)
+extract_host = "10.10.0.2"
+backend_host = "10.10.0.3"
+optimizer_host = "10.10.0.7"
+optimizer_port = 8000
+timeout_secs = 120
+
+[optimization.profiles.truck]
+# Turn penalties for truck routing (heavier U-turn penalties)
+turn_left_penalty = 3.0
+turn_right_penalty = 1.0
+turn_u_penalty = 8.0
+
+[optimization.profiles.car]
+# Turn penalties for car routing (minimal penalties)
+turn_left_penalty = 1.0
+turn_right_penalty = 0.0
+turn_u_penalty = 5.0
+
+[optimization.profiles.delivery]
+# Turn penalties for delivery vehicles (balanced)
+turn_left_penalty = 2.0
+turn_right_penalty = 0.5
+turn_u_penalty = 6.0
+
+[caching]
+# Cache directory for compiled graphs
+cache_dir = "~/.cache/rmpca"
+
+[telemetry]
+# Output structured JSON logs (useful for Tauri/frontend integration)
+json_logs = false
+
+[verification]
+# Use Lean 4 verified optimization (requires --feature lean4)
+lean4_verified = false
