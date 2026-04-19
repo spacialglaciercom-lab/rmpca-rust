@@ -481,6 +481,364 @@ impl Default for RouteOptimizer {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geo::types::{Coordinate, Way as GeoWay, WayGeometry};
+    use std::collections::HashMap;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn geo_way(id: &str, node_ids: &[&str], coords: &[(f64, f64)], oneway: bool) -> GeoWay {
+        let mut tags = HashMap::new();
+        if oneway {
+            tags.insert("oneway".to_string(), "yes".to_string());
+        }
+        GeoWay {
+            id: id.to_string(),
+            geometry: WayGeometry {
+                coordinates: coords
+                    .iter()
+                    .map(|&(lat, lon)| Coordinate::new(lat, lon))
+                    .collect(),
+            },
+            node_ids: node_ids.iter().map(|s| s.to_string()).collect(),
+            tags,
+        }
+    }
+
+    fn opt_way(id: &str, node_ids: &[&str], oneway: bool) -> Way {
+        let mut w = Way::new(id, node_ids.iter().map(|s| s.to_string()).collect());
+        if oneway {
+            w = w.with_tag("oneway", "yes");
+        }
+        w
+    }
+
+    fn node_in_deg(opt: &RouteOptimizer, id: &str) -> usize {
+        let idx = opt.node_index[id];
+        opt.graph
+            .edges_directed(idx, petgraph::Direction::Incoming)
+            .count()
+    }
+
+    fn node_out_deg(opt: &RouteOptimizer, id: &str) -> usize {
+        let idx = opt.node_index[id];
+        opt.graph
+            .edges_directed(idx, petgraph::Direction::Outgoing)
+            .count()
+    }
+
+    // ── build_graph ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_build_graph_two_way_creates_bidirectional_edges() {
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[opt_way("w1", &["A", "B", "C"], false)])
+            .unwrap();
+        // A–B and B–C, each bidirectional → 4 directed edges
+        assert_eq!(opt.graph.node_count(), 3);
+        assert_eq!(opt.graph.edge_count(), 4);
+        assert_eq!(node_out_deg(&opt, "A"), 1);
+        assert_eq!(node_in_deg(&opt, "A"), 1);
+    }
+
+    #[test]
+    fn test_build_graph_oneway_creates_directed_edges_only() {
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[opt_way("w1", &["A", "B", "C"], true)])
+            .unwrap();
+        // A→B and B→C only — no reverse edges
+        assert_eq!(opt.graph.node_count(), 3);
+        assert_eq!(opt.graph.edge_count(), 2);
+        assert_eq!(node_out_deg(&opt, "A"), 1);
+        assert_eq!(node_in_deg(&opt, "A"), 0);
+        assert_eq!(node_out_deg(&opt, "C"), 0);
+        assert_eq!(node_in_deg(&opt, "C"), 1);
+    }
+
+    #[test]
+    fn test_build_graph_shared_node_deduplicated() {
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[
+            opt_way("w1", &["A", "B"], false),
+            opt_way("w2", &["B", "C"], false),
+        ])
+        .unwrap();
+        // B is shared across both ways; must appear exactly once
+        assert_eq!(opt.graph.node_count(), 3);
+        assert_eq!(opt.node_index.len(), 3);
+        // B has edges to/from both A and C
+        assert_eq!(node_out_deg(&opt, "B"), 2);
+        assert_eq!(node_in_deg(&opt, "B"), 2);
+    }
+
+    #[test]
+    fn test_build_graph_empty_ways_produces_empty_graph() {
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[]).unwrap();
+        assert_eq!(opt.graph.node_count(), 0);
+        assert_eq!(opt.graph.edge_count(), 0);
+    }
+
+    // ── make_eulerian ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_make_eulerian_already_balanced_is_noop() {
+        // Directed triangle A→B→C→A — every node has in=out=1
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[
+            opt_way("w1", &["A", "B"], true),
+            opt_way("w2", &["B", "C"], true),
+            opt_way("w3", &["C", "A"], true),
+        ])
+        .unwrap();
+        let edges_before = opt.graph.edge_count();
+        opt.make_eulerian().unwrap();
+        assert_eq!(opt.graph.edge_count(), edges_before, "no augmenting edges should be added");
+        assert!(opt.augmented_edges.is_empty());
+    }
+
+    #[test]
+    fn test_make_eulerian_empty_graph_succeeds() {
+        let mut opt = RouteOptimizer::new();
+        opt.make_eulerian().unwrap();
+        assert_eq!(opt.graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_make_eulerian_imbalanced_graph_adds_augmenting_edges() {
+        // Cycle A→B→C→D→A plus shortcut C→B.
+        // C: out=2 (C→D, C→B), in=1 (B→C) → supply
+        // B: out=1 (B→C),      in=2 (A→B, C→B) → demand
+        let mut opt = RouteOptimizer::new();
+        opt.build_graph(&[
+            opt_way("w1", &["A", "B"], true),
+            opt_way("w2", &["B", "C"], true),
+            opt_way("w3", &["C", "D"], true),
+            opt_way("w4", &["D", "A"], true),
+            opt_way("w5", &["C", "B"], true),
+        ])
+        .unwrap();
+        assert_eq!(node_in_deg(&opt, "B"), 2);
+        assert_eq!(node_out_deg(&opt, "B"), 1);
+
+        opt.make_eulerian().unwrap();
+        // The function must not panic and must record augmented edges
+        assert!(!opt.augmented_edges.is_empty());
+    }
+
+    // ── retain_largest_scc ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_retain_largest_scc_drops_smaller_component() {
+        // Triangle A↔B↔C↔A (3-node SCC) + isolated pair D↔E (2-node SCC)
+        let ways = vec![
+            geo_way("w1", &["A", "B"], &[(45.500, -73.500), (45.501, -73.501)], false),
+            geo_way("w2", &["B", "C"], &[(45.501, -73.501), (45.502, -73.502)], false),
+            geo_way("w3", &["C", "A"], &[(45.502, -73.502), (45.500, -73.500)], false),
+            geo_way("w4", &["D", "E"], &[(46.000, -74.000), (46.001, -74.001)], false),
+        ];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+        opt.build_graph_from_geo_ways(&ways).unwrap();
+        opt.retain_largest_scc().unwrap();
+
+        assert_eq!(opt.graph.node_count(), 3, "only the 3-node SCC should remain");
+        assert!(opt.node_index.contains_key("A"));
+        assert!(opt.node_index.contains_key("B"));
+        assert!(opt.node_index.contains_key("C"));
+        assert!(!opt.node_index.contains_key("D"));
+        assert!(!opt.node_index.contains_key("E"));
+    }
+
+    #[test]
+    fn test_retain_largest_scc_single_component_unchanged() {
+        let ways = vec![
+            geo_way("w1", &["A", "B"], &[(45.500, -73.500), (45.501, -73.501)], false),
+            geo_way("w2", &["B", "C"], &[(45.501, -73.501), (45.502, -73.502)], false),
+            geo_way("w3", &["C", "A"], &[(45.502, -73.502), (45.500, -73.500)], false),
+        ];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+        opt.build_graph_from_geo_ways(&ways).unwrap();
+        let node_count_before = opt.graph.node_count();
+        opt.retain_largest_scc().unwrap();
+        assert_eq!(opt.graph.node_count(), node_count_before);
+    }
+
+    #[test]
+    fn test_retain_largest_scc_empty_graph_is_ok() {
+        let mut opt = RouteOptimizer::new();
+        opt.retain_largest_scc().unwrap();
+        assert_eq!(opt.graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_retain_largest_scc_rebuilds_node_index() {
+        // After SCC trimming the node_index must only contain surviving nodes
+        let ways = vec![
+            geo_way("w1", &["A", "B"], &[(45.500, -73.500), (45.501, -73.501)], false),
+            geo_way("w2", &["B", "C"], &[(45.501, -73.501), (45.502, -73.502)], false),
+            geo_way("w3", &["C", "A"], &[(45.502, -73.502), (45.500, -73.500)], false),
+            geo_way("w4", &["X", "Y"], &[(50.000, -80.000), (50.001, -80.001)], false),
+        ];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+        opt.build_graph_from_geo_ways(&ways).unwrap();
+        assert_eq!(opt.node_index.len(), 5);
+        opt.retain_largest_scc().unwrap();
+        assert_eq!(opt.node_index.len(), 3);
+        // Every key in node_index must map to a valid NodeIndex in the graph
+        for (id, &idx) in &opt.node_index {
+            assert_eq!(&opt.graph[idx].id, id);
+        }
+    }
+
+    // ── optimize (GeoJSON pipeline) ──────────────────────────────────────────
+
+    #[test]
+    fn test_optimize_eulerian_triangle_returns_closed_circuit() {
+        // One-way triangle: already Eulerian, no augmentation needed
+        let geojson = serde_json::json!({
+            "type": "FeatureCollection",
+            "features": [
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.500,45.500],[-73.501,45.501]]},"properties":{"oneway":"yes"}},
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.501,45.501],[-73.502,45.502]]},"properties":{"oneway":"yes"}},
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.502,45.502],[-73.500,45.500]]},"properties":{"oneway":"yes"}}
+            ]
+        });
+        let mut opt = RouteOptimizer::new();
+        let result = opt.optimize(&geojson).unwrap();
+
+        assert!(!result.route.is_empty(), "circuit must contain route points");
+        let first = &result.route[0];
+        let last = result.route.last().unwrap();
+        assert!(
+            (first.latitude - last.latitude).abs() < 1e-9
+                && (first.longitude - last.longitude).abs() < 1e-9,
+            "Eulerian circuit must be closed (start == end)"
+        );
+    }
+
+    #[test]
+    fn test_optimize_reports_positive_total_distance() {
+        let geojson = serde_json::json!({
+            "type": "FeatureCollection",
+            "features": [
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.500,45.500],[-73.600,45.600]]},"properties":{"oneway":"yes"}},
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.600,45.600],[-73.700,45.700]]},"properties":{"oneway":"yes"}},
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.700,45.700],[-73.500,45.500]]},"properties":{"oneway":"yes"}}
+            ]
+        });
+        let mut opt = RouteOptimizer::new();
+        let result = opt.optimize(&geojson).unwrap();
+        assert!(result.total_distance > 0.0);
+    }
+
+    #[test]
+    fn test_optimize_empty_features_returns_error() {
+        let geojson = serde_json::json!({"type":"FeatureCollection","features":[]});
+        let mut opt = RouteOptimizer::new();
+        assert!(opt.optimize(&geojson).is_err());
+    }
+
+    #[test]
+    fn test_optimize_two_way_street_circuit_covers_all_edges() {
+        // Single bidirectional segment A↔B. Eulerian circuit must traverse both directions.
+        let geojson = serde_json::json!({
+            "type": "FeatureCollection",
+            "features": [
+                {"type":"Feature","geometry":{"type":"LineString","coordinates":[[-73.500,45.500],[-73.501,45.501]]},"properties":{}}
+            ]
+        });
+        let mut opt = RouteOptimizer::new();
+        let result = opt.optimize(&geojson).unwrap();
+        // Route must have at least 3 points: A→B→A
+        assert!(result.route.len() >= 3, "bidirectional edge requires both directions in circuit");
+    }
+
+    // ── route_between ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_route_between_finds_path_on_linear_graph() {
+        let ways = vec![
+            geo_way("w1", &["A", "B"], &[(45.500, -73.500), (45.501, -73.501)], false),
+            geo_way("w2", &["B", "C"], &[(45.501, -73.501), (45.502, -73.502)], false),
+        ];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+        opt.build_graph_from_geo_ways(&ways).unwrap();
+
+        let from = Coordinate::new(45.500, -73.500); // snaps to A
+        let to = Coordinate::new(45.502, -73.502);   // snaps to C
+        let result = opt.route_between(&from, &to).unwrap();
+
+        assert!(!result.path.is_empty());
+        assert!(result.distance_m > 0.0);
+        let (end_coord, _) = result.path.last().unwrap();
+        assert!((end_coord.lat - 45.502).abs() < 1e-6);
+        assert!((end_coord.lon - (-73.502)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_route_between_empty_graph_returns_error() {
+        let opt = RouteOptimizer::new();
+        let err = opt.route_between(
+            &Coordinate::new(45.500, -73.500),
+            &Coordinate::new(45.501, -73.501),
+        );
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_route_between_no_path_between_disconnected_components() {
+        // A→B (oneway) and D→E (oneway, no connection to A/B)
+        let ways = vec![
+            geo_way("w1", &["A", "B"], &[(45.500, -73.500), (45.501, -73.501)], true),
+            geo_way("w2", &["D", "E"], &[(46.000, -74.000), (46.001, -74.001)], true),
+        ];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+        opt.build_graph_from_geo_ways(&ways).unwrap();
+
+        // A is nearest to (45.500, -73.500); E is nearest to (46.001, -74.001)
+        let err = opt.route_between(
+            &Coordinate::new(45.500, -73.500),
+            &Coordinate::new(46.001, -74.001),
+        );
+        assert!(err.is_err(), "no route should exist between disconnected components");
+    }
+
+    // ── nearest_node_id ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nearest_node_id_returns_closest_node() {
+        let ways = vec![geo_way(
+            "w1",
+            &["A", "B"],
+            &[(45.500, -73.500), (45.510, -73.510)],
+            false,
+        )];
+        let mut opt = RouteOptimizer::new();
+        opt.populate_spatial_registry_from_geo_ways(&ways);
+
+        // Query very close to A
+        let nearest = opt.nearest_node_id(&Coordinate::new(45.5001, -73.5001)).unwrap();
+        assert_eq!(nearest, "A");
+
+        // Query very close to B
+        let nearest = opt.nearest_node_id(&Coordinate::new(45.5099, -73.5099)).unwrap();
+        assert_eq!(nearest, "B");
+    }
+
+    #[test]
+    fn test_nearest_node_id_empty_registry_returns_none() {
+        let opt = RouteOptimizer::new();
+        assert!(opt.nearest_node_id(&Coordinate::new(45.5, -73.5)).is_none());
+    }
+}
+
 /// Result of a point-to-point routing query.
 pub struct RoutingResult {
     /// Path as (coordinate, node_id) pairs, start → end
