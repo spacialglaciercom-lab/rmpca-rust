@@ -141,6 +141,7 @@ export class CPPOptimizer {
         }, () => {
             // stdout closed — parse result
             this._subprocess.wait_async(null, (proc, res) => {
+                this._subprocess = null;
                 try {
                     proc.wait_finish(res);
                     let exitStatus = proc.get_exit_status();
@@ -195,8 +196,6 @@ export class CPPOptimizer {
                     Utils.debug('CPP: result parse error: ' + e.message);
                     this._route.error(_("Failed to parse optimization result"));
                 }
-
-                this._subprocess = null;
             });
         });
     }
