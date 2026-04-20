@@ -42,6 +42,7 @@ import {PlaceStore} from './placeStore.js';
 import * as Translations from './translations.js';
 import * as Utils from './utils.js';
 import * as Wikipedia from './wikipedia.js';
+import * as Offline from './offline.js';
 
 const _ = gettext.gettext;
 const ngettext = gettext.ngettext;
@@ -769,17 +770,20 @@ export class PlaceView extends Gtk.Box {
             box.marginTop = 12;
             box.marginBottom = 18;
             box.append(descriptionLabel);
-        } else if (place.wikidata && Wikipedia.isValidWikidata(place.wikidata)) {
-            let defaultArticle =
-                place.wiki && Wikipedia.isValidWikipedia(place.wiki) ?
-                place.wiki : null;
+        } else if (Offline.isFeatureAvailable('wikipedia')) {
+            // Only fetch Wikipedia/Wikidata in online mode
+            if (place.wikidata && Wikipedia.isValidWikidata(place.wikidata)) {
+                let defaultArticle =
+                    place.wiki && Wikipedia.isValidWikipedia(place.wiki) ?
+                    place.wiki : null;
 
-            this._requestWikidata(place.wikidata, defaultArticle);
-        } else if (place.wiki && Wikipedia.isValidWikipedia(place.wiki)) {
-            this._requestWikipedia(place.wiki);
-        } else if (place.brandWikidata &&
-                   Wikipedia.isValidWikidata(place.brandWikidata)) {
-            this._requestWikidataLogo(place.brandWikidata);
+                this._requestWikidata(place.wikidata, defaultArticle);
+            } else if (place.wiki && Wikipedia.isValidWikipedia(place.wiki)) {
+                this._requestWikipedia(place.wiki);
+            } else if (place.brandWikidata &&
+                       Wikipedia.isValidWikidata(place.brandWikidata)) {
+                this._requestWikidataLogo(place.brandWikidata);
+            }
         }
 
         this.updatePlaceDetails();

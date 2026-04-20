@@ -40,6 +40,14 @@ pub struct Config {
     /// R2 secret access key (sensitive — prefer env var)
     #[serde(default)]
     pub rmpca_r2_secret_access_key: String,
+
+    /// Offline mode - disable all network calls
+    #[serde(default)]
+    pub rmpca_offline: bool,
+
+    /// Path to offline map file (.osm.pbf)
+    #[serde(default)]
+    pub rmpca_offline_map: String,
 }
 
 fn default_extract_host() -> String { "10.10.0.2".into() }
@@ -87,6 +95,20 @@ impl Config {
     pub fn r2_s3_endpoint(&self) -> String {
         format!("{}.r2.cloudflarestorage.com", self.rmpca_r2_account_id)
     }
+
+    /// Check if offline mode is enabled
+    pub fn is_offline(&self) -> bool {
+        self.rmpca_offline
+    }
+
+    /// Get offline map path if configured
+    pub fn offline_map_path(&self) -> Option<std::path::PathBuf> {
+        if self.rmpca_offline_map.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(&self.rmpca_offline_map))
+        }
+    }
 }
 
 impl Default for Config {
@@ -101,6 +123,8 @@ impl Default for Config {
             rmpca_r2_bucket: String::new(),
             rmpca_r2_access_key_id: String::new(),
             rmpca_r2_secret_access_key: String::new(),
+            rmpca_offline: false,
+            rmpca_offline_map: String::new(),
         }
     }
 }

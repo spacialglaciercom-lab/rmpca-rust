@@ -38,7 +38,10 @@ pub async fn run(args: ExtractOvertureArgs, config: &Config) -> Result<()> {
         if args.input.exists() {
             eprintln!("Extracting Overture road data from local file...");
         } else {
+            #[cfg(feature = "r2")]
             eprintln!("Extracting Overture road data from R2 (bucket: {})...", config.rmpca_r2_bucket);
+            #[cfg(not(feature = "r2"))]
+            eprintln!("Extracting Overture road data...");
         }
     }
 
@@ -70,7 +73,8 @@ pub async fn run(args: ExtractOvertureArgs, config: &Config) -> Result<()> {
         cmd.arg("-where").arg(filter);
     }
 
-    // Set AWS env vars for R2 S3 access when using /vsis3/
+    // Set AWS env vars for R2 S3 access when using /vsis3/ (only if r2 feature enabled)
+    #[cfg(feature = "r2")]
     if !args.input.exists() && config.is_r2_configured() {
         cmd.env("AWS_ACCESS_KEY_ID", &config.rmpca_r2_access_key_id);
         cmd.env("AWS_SECRET_ACCESS_KEY", &config.rmpca_r2_secret_access_key);
@@ -90,22 +94,26 @@ pub async fn run(args: ExtractOvertureArgs, config: &Config) -> Result<()> {
 }
 
 /// Resolve input: if the file exists locally, use it directly.
-/// Otherwise, if R2 is configured, construct a /vsis3/ path.
+/// Otherwise, if R2 is configured and the r2 feature is enabled, construct a /vsis3/ path.
 fn resolve_input(input: &PathBuf, config: &Config) -> Result<String> {
     if input.exists() {
         return Ok(input.to_string_lossy().to_string());
     }
 
-    if !config.is_r2_configured() {
-        anyhow::bail!(
-            "Input file '{}' not found locally and R2 is not configured. \
-             Set RMPCA_R2_ACCOUNT_ID, RMPCA_R2_BUCKET, RMPCA_R2_ACCESS_KEY_ID, \
-             and RMPCA_R2_SECRET_ACCESS_KEY environment variables.",
-            input.display()
-        );
+    #[cfg(feature = "r2")]
+    if config.is_r2_configured() {
+        // Treat the input path as an R2 object key
+        let key = input.to_string_lossy();
+        return Ok(format!("/vsis3/{}/{}", config.rmpca_r2_bucket, key));
     }
 
-    // Treat the input path as an R2 object key
-    let key = input.to_string_lossy();
-    Ok(format!("/vsis3/{}/{}", config.rmpca_r2_bucket, key))
+    // Offline mode: require local file
+    anyhow::bail!(
+        "Input file '{}' not found locally.\n\
+         For offline deployments, place the .pmtiles file at the specified path.\n\
+         See docs/offline-bundles.md for bundle preparation instructions.\n\
+         \n\
+         If you intended to fetch from R2, rebuild with --features r2",
+        input.display()
+    );
 }

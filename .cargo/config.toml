@@ -1,0 +1,13 @@
+# Cargo configuration for offline builds
+# 
+# When CARGO_NET_OFFLINE=true, cargo will use vendored sources from ./vendor/
+# This enables fully offline builds without network access.
+#
+# Usage:
+#   CARGO_NET_OFFLINE=true cargo build --offline --release
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

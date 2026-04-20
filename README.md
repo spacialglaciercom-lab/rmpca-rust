@@ -51,6 +51,22 @@ cargo build --release
 # The binary will be at ./target/release/rmpca
 ```
 
+### Offline Build (Air-Gapped Systems)
+
+For fully offline builds with no network access:
+
+```bash
+# Vendored dependencies are included in the repository
+# Build completely offline:
+cargo build --offline --release
+
+# Or with explicit offline flag:
+CARGO_NET_OFFLINE=true cargo build --offline --release
+```
+
+This is the canonical build method for air-gapped FreeBSD deployments.
+All dependencies are vendored in `vendor/` and configured via `.cargo/config.toml`.
+
 ### Build with Lean 4 Support
 
 ```bash

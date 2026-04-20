@@ -52,6 +52,12 @@ proptest = "1.4"
 # Date/time handling
 chrono = "0.4"
 
+# SHA256 hashing for bundle verification
+sha2 = "0.10"
+
+# Directory walking for bundle creation
+walkdir = "2.4"
+
 # Optional dependencies
 [dependencies.dirs]
 version = "5.0"
@@ -64,6 +70,8 @@ proptest = "1.4"
 [features]
 default = []
 lean4 = []  # Enable Lean 4 FFI integration (placeholder)
+r2 = []     # Enable R2/PMTiles remote fetch (online-only)
+network = ["r2"]  # Enable all network-dependent features
 
 [profile.release]
 opt-level = 3

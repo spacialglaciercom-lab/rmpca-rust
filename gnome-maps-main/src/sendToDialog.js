@@ -32,6 +32,7 @@ import GWeather from 'gi://GWeather';
 import {Application} from './application.js';
 import {PlaceFormatter} from './placeFormatter.js';
 import * as Utils from './utils.js';
+import * as Offline from './offline.js';
 
 const _ = gettext.gettext;
 
@@ -66,8 +67,15 @@ export class SendToDialog extends Adw.Dialog {
 
         this.connect('realize', () => {
             this._summaryLabel.label = this._getSummary();
-            let osmuri = GLib.markup_escape_text(this._getOSMURI(), -1);
-            this._summaryUrl.label = '<a href="%s">%s</a>'.format(osmuri, osmuri);
+            
+            // Hide OSM URL in offline mode
+            if (Offline.isFeatureAvailable('osm-edit')) {
+                let osmuri = GLib.markup_escape_text(this._getOSMURI(), -1);
+                this._summaryUrl.label = '<a href="%s">%s</a>'.format(osmuri, osmuri);
+                this._summaryUrl.visible = true;
+            } else {
+                this._summaryUrl.visible = false;
+            }
 
             this._copyButton.connect('clicked', () => this._copySummary());
             this._emailButton.connect('clicked', () => this._emailSummary());

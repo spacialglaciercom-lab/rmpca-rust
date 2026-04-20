@@ -79,6 +79,7 @@
     <file>osmTypes.js</file>
     <file>osmUtils.js</file>
     <file>overpass.js</file>
+    <file>offline.js</file>
     <file>photonGeocode.js</file>
     <file>photonUtils.js</file>
     <file>place.js</file>

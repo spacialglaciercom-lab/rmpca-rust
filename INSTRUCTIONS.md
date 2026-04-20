@@ -95,7 +95,10 @@ turn_u_penalty = 8.0
 cache_dir = "/var/db/rmpca/cache"
 ```
 
-### Cloudflare R2 Configuration
+### Cloudflare R2 Configuration (Online-Only)
+
+> **Note:** R2 remote fetch requires network access. For offline deployments, skip this section and use local files.
+
 Set these environment variables to enable remote PMTiles extraction from R2. When `--input` doesn't exist locally, `extract-overture` automatically resolves it as an R2 object key using `/vsis3/`.
 
 | Variable | Description |
@@ -110,6 +113,44 @@ Credentials can also be stored in a `.env` file in the project root (ensure it's
 **Available R2 keys** (bucket `routemasterpro`):
 - `tiles/<city>-v2026-02.pmtiles` — PMTiles extracts for ~100 North American cities
 - `overture/montreal-roads-only.geojson` — pre-extracted Montreal road network
+
+---
+
+## Offline Mode
+
+For air-gapped deployments, rmpca can operate entirely without network access.
+
+### Enabling Offline Mode
+
+```bash
+export RMPCA_OFFLINE=1
+export RMPCA_OFFLINE_MAP=/path/to/region.osm.pbf
+```
+
+### Offline Bundle Management
+
+Create and verify offline bundles:
+
+```bash
+# Create a bundle manifest
+rmpca bundle create --path ./bundle-dir --name montreal
+
+# Verify bundle integrity
+rmpca bundle verify --path ./bundle-dir -v
+```
+
+### Features in Offline Mode
+
+| Feature | Status |
+|---------|--------|
+| Coverage routing | Available |
+| Point-to-point routing | Available |
+| Map tiles | Available (with PMTiles) |
+| Wikipedia thumbnails | Disabled |
+| OSM editing | Disabled |
+| Public transit | Disabled |
+
+See `docs/offline-mode.md` and `docs/offline-bundles.md` for detailed instructions.
 
 ## Need Help?
 For specific command options, use the `--help` flag:

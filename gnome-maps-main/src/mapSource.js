@@ -25,6 +25,7 @@ import GnomeMaps from 'gi://GnomeMaps';
 
 import {Application} from './application.js';
 import * as Utils from './utils.js';
+import * as Offline from './offline.js';
 import { generateMapStyle } from './mapStyle/mapStyle.js';
 
 let lightStyle = null;
@@ -37,12 +38,22 @@ export var spriteSource = null;
 export function createVectorSource() {
     const start = GLib.get_monotonic_time();
     const colorScheme = Adw.StyleManager.get_default().dark ? 'dark' : 'light';
+    
+    // Use offline tile URL if in offline mode, otherwise use GSettings
+    let tileUrlPattern;
+    if (Offline.isOffline()) {
+        tileUrlPattern = Offline.getTileUrlPattern();
+        Utils.debug(`[offline] Using local tiles: ${tileUrlPattern}`);
+    } else {
+        tileUrlPattern = Application.settings.get('vector-tile-source-url-pattern');
+    }
+    
     const styleParams =
         {
             colorScheme: colorScheme,
             language: Utils.getLanguage(),
             textScale: Adw.LengthUnit.to_px(Adw.LengthUnit.SP, 1, null),
-            tileUrlPattern: Application.settings.get('vector-tile-source-url-pattern'),
+            tileUrlPattern: tileUrlPattern,
         };
     let style;
 

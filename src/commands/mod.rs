@@ -1,5 +1,6 @@
 //! Command implementations for rmpca CLI
 
+pub mod bundle;
 pub mod clean;
 pub mod compile_map;
 pub mod extract_overture;
@@ -13,6 +14,7 @@ pub mod status;
 pub mod validate;
 
 // Export argument structs for main.rs
+pub use bundle::BundleArgs;
 pub use clean::CleanArgs;
 pub use compile_map::CompileMapArgs;
 pub use extract_overture::ExtractOvertureArgs;

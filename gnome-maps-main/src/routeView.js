@@ -40,6 +40,7 @@ import {TransitLegRow} from './transitLegRow.js';
 import {TransitMoreRow} from './transitMoreRow.js';
 import {TransitOptionsPanel} from './transitOptionsPanel.js';
 import * as Utils from './utils.js';
+import * as Offline from './offline.js';
 
 const ID_PEDESTRIAN = 'pedestrian';
 const ID_CAR = 'car';
@@ -67,6 +68,11 @@ export class RouteView extends Gtk.Box {
         this._transitHeader.add_named(this._transitItineraryHeader,
                                       'itinerary-header');
         this._initTransportationToggles();
+        
+        // Disable transit option in offline mode
+        if (Offline.isOffline()) {
+            this._disableTransitOption();
+        }
 
         this._initQuerySignals();
         this._query.addPoint(0);
@@ -133,6 +139,26 @@ export class RouteView extends Gtk.Box {
 
         setToggles.bind(this)();
         this._query.connect('notify::transportation', setToggles.bind(this));
+    }
+
+    _disableTransitOption() {
+        // Hide transit button in offline mode
+        // The modeChooser is a GtkStack with buttons for each transport type
+        // We need to find and hide the transit button
+        let child = this._modeChooser.get_first_child();
+        while (child) {
+            if (child.name === ID_TRANSIT) {
+                child.visible = false;
+                child.sensitive = false;
+                break;
+            }
+            child = child.get_next_sibling();
+        }
+        
+        // If currently in transit mode, switch to pedestrian
+        if (this._query.transportation === RouteQuery.Transportation.TRANSIT) {
+            this._query.transportation = RouteQuery.Transportation.PEDESTRIAN;
+        }
     }
 
     _switchRoutingMode(mode) {

@@ -6,6 +6,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod backend;
 mod client;
 mod commands;
 mod config;
@@ -69,6 +70,9 @@ enum Commands {
     /// Tail service logs from a jail
     Logs(commands::logs::LogsArgs),
 
+    /// Manage offline bundles (verify, create)
+    Bundle(commands::bundle::BundleArgs),
+
     /// Run property-based tests for algorithmic correctness
     #[command(aliases = &["test-properties", "proptest"])]
     TestProperties,
@@ -127,6 +131,7 @@ async fn main() -> Result<()> {
         Commands::Route(args) => commands::route::run(args, &config),
         Commands::Serve(args) => commands::serve::run(args, &config),
         Commands::Logs(args) => commands::logs::run(args, &client).await,
+        Commands::Bundle(args) => commands::bundle::run(args).await,
         Commands::TestProperties => {
             // Run property-based tests
             eprintln!("Running property-based tests...");

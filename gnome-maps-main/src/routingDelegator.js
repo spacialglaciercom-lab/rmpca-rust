@@ -26,6 +26,7 @@ import {Transitous} from './transitous.js';
 import {Plan} from './transit/plan.js';
 import { Route } from './route.js';
 import { StoredRoute } from './storedRoute.js';
+import * as Offline from './offline.js';
 
 export class RoutingDelegator {
 
@@ -36,9 +37,12 @@ export class RoutingDelegator {
 
         this._transitRouting = false;
 
+        // Use offline router if in offline mode OR if offline file is configured
         let offlineFile = Application.settings.get('cpp-offline-map-file');
         let rmpcaPath   = Application.settings.get('rmpca-path');
-        this._graphHopper = offlineFile
+        let useOffline = Offline.isOffline() || offlineFile;
+        
+        this._graphHopper = useOffline
             ? new RmpcaRouter({ query: this._query, route: this._route,
                                  osmFile: offlineFile, rmpcaPath })
             : new GraphHopper({ query: this._query, route: this._route });

@@ -101,5 +101,20 @@
       <summary>Offline map file for CPP routing</summary>
       <description>Path to the local .osm.pbf file used for offline area-coverage route optimization.</description>
     </key>
+    <key name="offline-mode" type="b">
+      <default>false</default>
+      <summary>Offline mode</summary>
+      <description>When enabled, all network-dependent features are disabled and local tile/routing sources are used.</description>
+    </key>
+    <key name="tile-bundle-path" type="s">
+      <default>''</default>
+      <summary>Local tile bundle path</summary>
+      <description>Path to local PMTiles file or tile server URL for offline map tiles.</description>
+    </key>
+    <key name="local-tile-server-port" type="i">
+      <default>8080</default>
+      <summary>Local tile server port</summary>
+      <description>Port for the local pmtiles serve process when using offline tiles.</description>
+    </key>
   </schema>
 </schemalist>

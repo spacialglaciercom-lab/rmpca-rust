@@ -73,6 +73,76 @@ This script handles:
 4. Verify "Optimize Route" runs using the `rmpca` binary.
 5. Verify "Export GPX" produces a valid file.
 
+## 5. Offline Mode Setup
+
+For air-gapped deployments, additional setup is required:
+
+### A. Install Offline Dependencies
+
+```bash
+# Install pmtiles CLI for local tile serving
+go install github.com/protomaps/go-pmtiles/pmtiles@latest
+```
+
+### B. Prepare Offline Bundle
+
+```bash
+# Create bundle directory
+mkdir -p /usr/local/share/rmpca/bundles
+
+# Copy or create bundle (see docs/offline-bundles.md)
+# Bundle should contain:
+#   - tiles/region.pmtiles
+#   - osm/region.osm.pbf
+#   - graphs/region.rmp (optional)
+#   - manifest.json
+```
+
+### C. Configure Offline Mode
+
+```bash
+# Enable offline mode
+gsettings set org.gnome.Maps offline-mode true
+
+# Set paths to offline data
+gsettings set org.gnome.Maps tile-bundle-path /usr/local/share/rmpca/bundles/montreal/tiles/montreal.pmtiles
+gsettings set org.gnome.Maps cpp-offline-map-file /usr/local/share/rmpca/bundles/montreal/osm/montreal.osm.pbf
+gsettings set org.gnome.Maps local-tile-server-port 8080
+
+# Set environment for rmpca
+export RMPCA_OFFLINE=1
+export RMPCA_OFFLINE_MAP=/usr/local/share/rmpca/bundles/montreal/osm/montreal.osm.pbf
+```
+
+### D. Start Local Tile Server
+
+```bash
+# Create systemd service or run manually
+pmtiles serve /usr/local/share/rmpca/bundles/montreal/tiles/montreal.pmtiles --port 8080 &
+```
+
+### E. Verify Offline Operation
+
+```bash
+# Run offline verification
+./scripts/check-no-network.sh --release
+
+# Test bundle integrity
+rmpca bundle verify --path /usr/local/share/rmpca/bundles/montreal
+```
+
+## 6. Offline Mode Features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Coverage routing | Available | Uses local .osm.pbf |
+| Point-to-point routing | Available | Uses rmpca route |
+| Map tiles | Available | Requires PMTiles + local server |
+| Wikipedia thumbnails | Disabled | No network access |
+| OSM editing | Disabled | Requires OAuth |
+| Public transit | Disabled | Requires Transitous API |
+
 ---
 **Prepared by**: Gemini CLI
 **Date**: Friday, April 17, 2026
+**Updated for Offline Mode**: April 2025
