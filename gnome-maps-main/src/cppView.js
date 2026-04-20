@@ -56,6 +56,7 @@ export class CPPView extends Gtk.Box {
         this._polygon = null;
         this._drawingArea = false;
         this._running = false;
+        this._polygonClosed = false;
 
         /* ---- Wire up UI elements ---- */
 
@@ -78,6 +79,9 @@ export class CPPView extends Gtk.Box {
         this._optimizer.route.connect('update', () => this._onRouteUpdate());
         this._optimizer.route.connect('error', (_, msg) => this._onRouteError(msg));
         this._optimizer.route.connect('reset', () => this._onRouteReset());
+
+        /* ---- Initialize UI state ---- */
+        this._updatePolygonState();
     }
 
     /* ================================================================== */
@@ -121,15 +125,20 @@ export class CPPView extends Gtk.Box {
 
         this._drawingArea = true;
         this._polygon = null;
+        this._polygonClosed = false;
         this._drawAreaButton.label = _('Cancel Drawing');
+        this._updatePolygonState();
 
         this._mapView.enablePolygonSelection((polygon, closed) => {
-            if (polygon !== null)
+            if (polygon !== null) {
                 this._polygon = polygon;
+                this._polygonClosed = closed;
+            }
             if (closed) {
                 this._drawingArea = false;
                 this._drawAreaButton.label = _('Area Selected');
             }
+            this._updatePolygonState();
         });
     }
 
@@ -137,6 +146,26 @@ export class CPPView extends Gtk.Box {
         this._drawingArea = false;
         this._mapView.disablePolygonSelection();
         this._drawAreaButton.label = _('Draw Area on Map');
+    }
+
+    /* ================================================================== */
+    /*  Polygon state management                                            */
+    /* ================================================================== */
+
+    _updatePolygonState() {
+        /* Called whenever polygon changes. Updates UI state reactively.
+         * Invariant: polygon.length >= 3 → optimizeButton enabled, no warning */
+        let hasValidPolygon = this._polygon && this._polygon.length >= 3;
+        
+        /* Enable/disable optimize button based on polygon validity */
+        this._optimizeButton.sensitive = hasValidPolygon;
+        
+        /* Clear any stale error when polygon becomes valid */
+        if (hasValidPolygon && this._summaryLabel.has_css_class('error')) {
+            this._summaryLabel.label = '';
+            this._summaryLabel.remove_css_class('error');
+            this._resultsBox.visible = false;
+        }
     }
 
     /* ================================================================== */
