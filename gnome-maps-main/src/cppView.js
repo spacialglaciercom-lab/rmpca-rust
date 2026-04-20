@@ -120,10 +120,12 @@ export class CPPView extends Gtk.Box {
         }
 
         this._drawingArea = true;
+        this._polygon = null;
         this._drawAreaButton.label = _('Cancel Drawing');
 
         this._mapView.enablePolygonSelection((polygon, closed) => {
-            this._polygon = polygon;
+            if (polygon !== null)
+                this._polygon = polygon;
             if (closed) {
                 this._drawingArea = false;
                 this._drawAreaButton.label = _('Area Selected');
@@ -160,7 +162,10 @@ export class CPPView extends Gtk.Box {
         }
 
         if (!this._polygon || this._polygon.length < 3) {
-            this._showInlineError(_('Draw an area with at least 3 points on the map first'));
+            if (this._drawingArea)
+                this._showInlineError(_('Add at least 3 points, then close the polygon (double-click or click near the start)'));
+            else
+                this._showInlineError(_('Draw an area with at least 3 points on the map first'));
             return;
         }
 
