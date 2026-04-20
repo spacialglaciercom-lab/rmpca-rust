@@ -100,14 +100,5 @@ pub async fn run(args: PipelineArgs, client: &RmpClient) -> Result<()> {
         quiet: args.quiet,
     };
 
-    // TODO: Refactor optimize::run to accept raw GeoJSON string
-    // so pipeline can pass data in-process without temp files.
-    // For now, write to a temp file.
-    let tmp = std::env::temp_dir().join("rmpca-pipeline-tmp.geojson");
-    std::fs::write(&tmp, &cleaned)?;
-    let mut opt_args = optimize_args;
-    opt_args.input = tmp.clone();
-    let result = super::optimize::run(opt_args, client).await;
-    let _ = std::fs::remove_file(&tmp);
-    result
+    super::optimize::run_with_raw(optimize_args, &cleaned, client).await
 }

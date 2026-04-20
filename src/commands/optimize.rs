@@ -48,9 +48,12 @@ pub struct OptimizeArgs {
 }
 
 pub async fn run(args: OptimizeArgs, client: &RmpClient) -> Result<()> {
-    // Parse and validate input using typed geojson crate
     let raw = std::fs::read_to_string(&args.input)
         .context("Failed to read input file")?;
+    run_with_raw(args, &raw, client).await
+}
+
+pub async fn run_with_raw(args: OptimizeArgs, raw: &str, client: &RmpClient) -> Result<()> {
     let fc: FeatureCollection = raw.parse()
         .context("Input is not a valid GeoJSON FeatureCollection")?;
 
